@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this software or visualization, please cite it as shown."
+title: "NYCCAS 3D Control Chart"
+authors:
+  - family-names: "AddYourLastName"
+    given-names: "AddYourFirstName"
+version: "1.0.0"
+date-released: "2026-05-15"
+url: ""
+doi: ""
+abstract: "Interactive 3D control-chart visualization of seasonal borough measurements derived from NYCCAS-format CSV data."

@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NYCCAS 3D Control Chart</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: sans-serif;
+            background: #f9f9f7;
+            color: #222;
+            padding: 16px;
+        }
+        
+        #controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            padding: 12px 0 8px;
+            align-items: center;
+            font-size: 13px;
+            color: #666;
+        }
+        
+        #controls .title {
+            font-weight: 500;
+            color: #111;
+            font-size: 14px;
+        }
+        
+        #controls label {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+        }
+        
+        .swatch {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+        }
+        
+        #tooltip {
+            position: fixed;
+            background: #fff;
+            border: 0.5px solid #ccc;
+            border-radius: 6px;
+            padding: 7px 11px;
+            font-size: 12px;
+            pointer-events: none;
+            display: none;
+            z-index: 999;
+            color: #111;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        #threeContainer {
+            width: 100%;
+            height: 520px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 0.5px solid #ddd;
+            cursor: grab;
+            position: relative;
+        }
+        
+        #hint {
+            font-size: 11px;
+            color: #aaa;
+            text-align: center;
+            padding: 6px 0;
+        }
+        
+        @media (prefers-color-scheme: dark) {
+            body {
+                background: #1a1a1a;
+                color: #ddd;
+            }
+            #tooltip {
+                background: #2a2a2a;
+                border-color: #555;
+                color: #ddd;
+            }
+            #threeContainer {
+                border-color: #444;
+            }
+            #controls {
+                color: #aaa;
+            }
+            #controls .title {
+                color: #eee;
+            }
+            #hint {
+                color: #555;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="controls">
+        <span class="title">NYCCAS 3D Control Chart</span>
+        <div style="display:flex;gap:6px;margin-left:auto;flex-wrap:wrap;">
+            <label><input type="checkbox" id="chkWinter" checked> <span class="swatch" style="background:#4A90D9;"></span> Winter</label>
+            <label><input type="checkbox" id="chkSpring" checked> <span class="swatch" style="background:#5DB85C;"></span> Spring</label>
+            <label><input type="checkbox" id="chkSummer" checked> <span class="swatch" style="background:#E07B39;"></span> Summer</label>
+            <label><input type="checkbox" id="chkFall" checked> <span class="swatch" style="background:#C0504D;"></span> Fall</label>
+            <label><input type="checkbox" id="chkBands" checked> Control bands</label>
+        </div>
+    </div>
+
+    <div id="tooltip"></div>
+    <div id="threeContainer"></div>
+    <div id="hint">Drag to orbit &middot; Scroll to zoom &middot; Right-drag to pan</div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        const BOROUGHS = ['Bronx', 'Brooklyn', 'Manhattan', 'Queens', 'Staten Island'];
+        const SEASONS = ['Winter', 'Spring', 'Summer', 'Fall'];
+        const S_COLORS = {
+            Winter: 0x4A90D9,
+            Spring: 0x5DB85C,
+            Summer: 0xE07B39,
+            Fall: 0xC0504D
+        };
+
+        let RAW = [];
+        let allVals = [];
+        let mean = 0,
+            std = 0,
+            UCL = 0,
+            LCL = 0;
+        let allYears = [];
+        let minY = 0,
+            maxY = 0;
+
+        const container = document.getElementById('threeContainer');
+        const W = container.clientWidth || 680,
+            H = 520;
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({
+            antialias: true,
+            alpha: true
+        });
+
+        renderer.setSize(W, H);
+        renderer.setPixelRatio(window.devicePixelRatio || 1);
+        renderer.setClearColor(0x000000, 0);
+        container.appendChild(renderer.domElement);
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+        const dir = new THREE.DirectionalLight(0xffffff, 0.5);
+        dir.position.set(10, 20, 10);
+        scene.add(dir);
+
+        const spherical = {
+            theta: 0.6,
+            phi: 0.9,
+            r: 18
+        };
+        const target = new THREE.Vector3(0, 1, 0);
+
+        function updateCamera() {
+            camera.position.x = target.x + spherical.r * Math.sin(spherical.phi) * Math.sin(spherical.theta);
+            camera.position.y = target.y + spherical.r * Math.cos(spherical.phi);
+            camera.position.z = target.z + spherical.r * Math.sin(spherical.phi) * Math.cos(spherical.theta);
+            camera.lookAt(target);
+        }
+        updateCamera();
+
+        const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const axisCol = isDark ? 0xaaaaaa : 0x555555;
+        const gridCol = isDark ? 0x444444 : 0xcccccc;
+
+        function makeLine(pts, color, opacity = 1) {
+            const geo = new THREE.BufferGeometry().setFromPoints(pts);
+            const mat = new THREE.LineBasicMaterial({
+                color,
+                opacity,
+                transparent: opacity < 1
+            });
+            return new THREE.Line(geo, mat);
+        }
+
+        function mapX(year) {
+            return ((year - minY) / (maxY - minY)) * 10 - 5;
+        }
+
+        function mapY(val) {
+            return ((val - 0) / (30 - 0)) * 8 - 1;
+        }
+
+        function mapZ(borough) {
+            return (BOROUGHS.indexOf(borough) / 4) * 8 - 4;
+        }
+
+        const dataGroups = {};
+        const bandsGroup = new THREE.Group();
+        let spheres = [];
+
+        function mkBandPlane(yVal, color, opacity) {
+            const geo = new THREE.PlaneGeometry(10, 8);
+            const mat = new THREE.MeshBasicMaterial({
+                color,
+                opacity,
+                transparent: true,
+                side: THREE.DoubleSide,
+                depthWrite: false
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.rotation.x = -Math.PI / 2;
+            mesh.position.set(0, mapY(yVal), 0);
+            return mesh;
+        }
+
+        function mkControlLine(yVal, color) {
+            const pts = [
+                new THREE.Vector3(-5, mapY(yVal), -4), new THREE.Vector3(5, mapY(yVal), -4),
+                new THREE.Vector3(5, mapY(yVal), 4), new THREE.Vector3(-5, mapY(yVal), 4),
+                new THREE.Vector3(-5, mapY(yVal), -4)
+            ];
+            return makeLine(pts, color, 0.9);
+        }
+
+        function makeSprite(text, pos) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = isDark ? 'rgba(30,30,30,0.85)' : 'rgba(255,255,255,0.85)';
+            ctx.fillRect(0, 0, 256, 64);
+            ctx.fillStyle = isDark ? '#dddddd' : '#333333';
+            ctx.font = 'bold 22px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(text, 128, 40);
+            const tex = new THREE.CanvasTexture(canvas);
+            const mat = new THREE.SpriteMaterial({
+                map: tex,
+                transparent: true
+            });
+            const sp = new THREE.Sprite(mat);
+            sp.position.copy(pos);
+            sp.scale.set(2, 0.5, 1);
+            return sp;
+        }
+
+        function initScene() {
+            while (scene.children.length) scene.remove(scene.children[0]);
+            scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+            scene.add(dir);
+
+            SEASONS.forEach(s => {
+                dataGroups[s] = new THREE.Group();
+                scene.add(dataGroups[s]);
+            });
+            scene.add(bandsGroup);
+
+            while (bandsGroup.children.length) bandsGroup.remove(bandsGroup.children[0]);
+
+            const axes = new THREE.Group();
+            axes.add(makeLine([new THREE.Vector3(-5, mapY(0), 4), new THREE.Vector3(5, mapY(0), 4)], axisCol));
+            axes.add(makeLine([new THREE.Vector3(-5, mapY(0), -4), new THREE.Vector3(-5, mapY(30), -4)], axisCol));
+            axes.add(makeLine([new THREE.Vector3(-5, mapY(0), -4), new THREE.Vector3(-5, mapY(0), 4)], axisCol));
+
+            for (let v = 0; v <= 30; v += 5) {
+                const yp = mapY(v);
+                axes.add(makeLine([new THREE.Vector3(-5, yp, -4), new THREE.Vector3(-5.15, yp, -4)], axisCol));
+            }
+            BOROUGHS.forEach(b => {
+                const zp = mapZ(b);
+                axes.add(makeLine([new THREE.Vector3(-5, mapY(0), zp), new THREE.Vector3(-5.1, mapY(0), zp)], axisCol));
+            });
+            allYears.forEach(y => {
+                const xp = mapX(y);
+                axes.add(makeLine([new THREE.Vector3(xp, mapY(0), 4), new THREE.Vector3(xp, mapY(0) - 0.15, 4)], axisCol));
+                BOROUGHS.forEach(b => {
+                    axes.add(makeLine([new THREE.Vector3(xp, mapY(0), 4), new THREE.Vector3(xp, mapY(0), mapZ(b))], gridCol, 0.3));
+                });
+            });
+            scene.add(axes);
+
+            bandsGroup.add(mkBandPlane(UCL, 0xff4444, 0.06));
+            bandsGroup.add(mkBandPlane(LCL, 0x4444ff, 0.06));
+            bandsGroup.add(mkControlLine(mean, 0x888888));
+            bandsGroup.add(mkControlLine(UCL, 0xee3333));
+            bandsGroup.add(mkControlLine(LCL, 0x3333ee));
+
+            spheres = [];
+            BOROUGHS.forEach(borough => {
+                SEASONS.forEach(season => {
+                    const pts = RAW.filter(d => d.b === borough && d.s === season).sort((a, b) => a.y - b.y);
+                    if (!pts.length) return;
+
+                    const col = S_COLORS[season];
+                    if (pts.length > 1) {
+                        const linePts = pts.map(d => new THREE.Vector3(mapX(d.y), mapY(d.v), mapZ(d.b)));
+                        dataGroups[season].add(makeLine(linePts, col, 0.7));
+                    }
+                    pts.forEach(d => {
+                        const isOut = d.v > UCL || d.v < LCL;
+                        const geo = new THREE.SphereGeometry(isOut ? 0.18 : 0.13, 12, 12);
+                        const mat = new THREE.MeshPhongMaterial({
+                            color: isOut ? 0xff0000 : col,
+                            emissive: isOut ? 0x440000 : 0x000000
+                        });
+                        const mesh = new THREE.Mesh(geo, mat);
+                        mesh.position.set(mapX(d.y), mapY(d.v), mapZ(d.b));
+                        mesh.userData = d;
+                        dataGroups[season].add(mesh);
+                        spheres.push(mesh);
+                    });
+                });
+            });
+
+            BOROUGHS.forEach(b => scene.add(makeSprite(b, new THREE.Vector3(-5.5, mapY(0) - 0.5, mapZ(b)))));
+            allYears.filter((_, i) => i % 2 === 0).forEach(y => scene.add(makeSprite(String(y), new THREE.Vector3(mapX(y), mapY(0) - 0.7, 4.5))));
+            [0, 5, 10, 15, 20, 25, 30].forEach(v => scene.add(makeSprite(String(v), new THREE.Vector3(-5.8, mapY(v), -4))));
+            scene.add(makeSprite(`UCL=${UCL.toFixed(1)}`, new THREE.Vector3(5.5, mapY(UCL), 0)));
+            scene.add(makeSprite(`Mean=${mean.toFixed(1)}`, new THREE.Vector3(5.5, mapY(mean), 0)));
+            scene.add(makeSprite(`LCL=${LCL.toFixed(1)}`, new THREE.Vector3(5.5, mapY(LCL), 0)));
+        }
+
+        async function loadData() {
+            try {
+                const response = await fetch('./data_csv/NYCCAS-Seasonal-Borough.csv');
+                const text = await response.text();
+                const rows = text.trim().split(/\r?\n/).filter(line => line.trim().length > 0);
+                const headers = rows[0].split(',').map(h => h.trim());
+                const hMap = new Map(headers.map((h, i) => [h, i]));
+
+                for (let i = 1; i < rows.length; i++) {
+                    const cols = rows[i].split(',');
+                    const borough = (cols[hMap.get('Borough')] || '').trim();
+                    const year = Number((cols[hMap.get('Year')] || '').trim());
+                    const value = Number((cols[hMap.get('Value')] || '').trim());
+                    const season = (cols[hMap.get('Season')] || '').trim();
+
+                    if (borough && season && !Number.isNaN(year) && !Number.isNaN(value)) {
+                        RAW.push({
+                            b: borough,
+                            y: year,
+                            v: value,
+                            s: season
+                        });
+                    }
+                }
+
+                allYears = [...new Set(RAW.map(d => d.y))].sort();
+                minY = Math.min(...allYears);
+                maxY = Math.max(...allYears);
+
+                allVals = RAW.map(d => d.v);
+                mean = allVals.reduce((a, b) => a + b, 0) / allVals.length;
+                std = Math.sqrt(allVals.reduce((a, b) => a + (b - mean) ** 2, 0) / allVals.length);
+                UCL = mean + 2 * std;
+                LCL = Math.max(0, mean - 2 * std);
+
+                initScene();
+            } catch (err) {
+                console.error('Error loading CSV:', err);
+            }
+        }
+
+        loadData();
+
+        ['chkWinter', 'chkSpring', 'chkSummer', 'chkFall'].forEach((id, i) => {
+            document.getElementById(id).addEventListener('change', e => {
+                dataGroups[SEASONS[i]].visible = e.target.checked;
+            });
+        });
+        document.getElementById('chkBands').addEventListener('change', e => {
+            bandsGroup.visible = e.target.checked;
+        });
+
+        let isDragging = false,
+            isRight = false,
+            lastX = 0,
+            lastY = 0;
+
+        container.addEventListener('mousedown', e => {
+            isDragging = true;
+            isRight = e.button === 2;
+            lastX = e.clientX;
+            lastY = e.clientY;
+            container.style.cursor = 'grabbing';
+        });
+        window.addEventListener('mouseup', () => {
+            isDragging = false;
+            container.style.cursor = 'grab';
+        });
+        window.addEventListener('mousemove', e => {
+            if (!isDragging) return;
+            const dx = (e.clientX - lastX) * 0.01,
+                dy = (e.clientY - lastY) * 0.01;
+            if (isRight) {
+                const right = new THREE.Vector3();
+                camera.getWorldDirection(right);
+                right.cross(camera.up).normalize();
+                target.addScaledVector(right, -dx * 2);
+                target.addScaledVector(new THREE.Vector3(0, 1, 0), dy * 2);
+            } else {
+                spherical.theta -= dx;
+                spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi + dy));
+            }
+            updateCamera();
+            lastX = e.clientX;
+            lastY = e.clientY;
+        });
+        container.addEventListener('wheel', e => {
+            spherical.r = Math.max(5, Math.min(30, spherical.r + e.deltaY * 0.02));
+            updateCamera();
+        });
+        container.addEventListener('contextmenu', e => e.preventDefault());
+
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        const tooltip = document.getElementById('tooltip');
+
+        container.addEventListener('mousemove', e => {
+            const rect = container.getBoundingClientRect();
+            mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            const hits = raycaster.intersectObjects(spheres);
+            if (hits.length) {
+                const d = hits[0].object.userData;
+                const isOut = d.v > UCL || d.v < LCL;
+                tooltip.style.display = 'block';
+                tooltip.style.left = (e.clientX + 14) + 'px';
+                tooltip.style.top = (e.clientY - 10) + 'px';
+                tooltip.innerHTML = `<b>${d.b}</b><br>${d.s} ${d.y}<br>Value: <b>${d.v.toFixed(2)}</b>${isOut ? '<br><span style="color:#e24b4a">&#9888; Out of control</span>' : ''}`;
+            } else {
+                tooltip.style.display = 'none';
+            }
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+
+</html>

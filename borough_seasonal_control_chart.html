@@ -19,8 +19,8 @@
         
         body {
             font-family: sans-serif;
-            background: #f9f9f7;
-            color: #222;
+            background: #ffffff;
+            color: #000000;
             padding: 16px;
         }
         
@@ -116,11 +116,13 @@
     <div id="controls">
         <span class="title">NYCCAS 3D Control Chart</span>
         <div style="display:flex;gap:6px;margin-left:auto;flex-wrap:wrap;">
-            <label><input type="checkbox" id="chkWinter" checked> <span class="swatch" style="background:#4A90D9;"></span> Winter</label>
-            <label><input type="checkbox" id="chkSpring" checked> <span class="swatch" style="background:#5DB85C;"></span> Spring</label>
-            <label><input type="checkbox" id="chkSummer" checked> <span class="swatch" style="background:#E07B39;"></span> Summer</label>
-            <label><input type="checkbox" id="chkFall" checked> <span class="swatch" style="background:#C0504D;"></span> Fall</label>
+            <label><input type="checkbox" id="chkWinter" checked> <span class="swatch" style="background:#222222;"></span> Winter</label>
+            <label><input type="checkbox" id="chkSpring" checked> <span class="swatch" style="background:#666666;"></span> Spring</label>
+            <label><input type="checkbox" id="chkSummer" checked> <span class="swatch" style="background:#999999;"></span> Summer</label>
+            <label><input type="checkbox" id="chkFall" checked> <span class="swatch" style="background:#cccccc;"></span> Fall</label>
             <label><input type="checkbox" id="chkBands" checked> Control bands</label>
+            <button id="resetView">Reset View</button>
+            <label><input type="checkbox" id="chkBoroughMarkers" checked> Borough markers</label>
         </div>
     </div>
 
@@ -128,15 +130,35 @@
     <div id="threeContainer"></div>
     <div id="hint">Drag to orbit &middot; Scroll to zoom &middot; Right-drag to pan</div>
 
+    <div id="footer" style="margin-top:10px;border-top:1px solid #eee;padding:8px 12px;display:flex;justify-content:center;">
+        <div id="legend" style="display:flex;gap:8px;align-items:center;font-size:12px;color:#444"></div>
+    </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script>
         const BOROUGHS = ['Bronx', 'Brooklyn', 'Manhattan', 'Queens', 'Staten Island'];
         const SEASONS = ['Winter', 'Spring', 'Summer', 'Fall'];
         const S_COLORS = {
-            Winter: 0x4A90D9,
-            Spring: 0x5DB85C,
-            Summer: 0xE07B39,
-            Fall: 0xC0504D
+            Winter: 0x222222,
+            Spring: 0x666666,
+            Summer: 0x999999,
+            Fall: 0xCCCCCC
+        };
+
+        // borough-specific marker definitions (reusable geometries)
+        const BOROUGH_MARKERS = [
+            { type: 'sphere', scale: 1.0 },
+            { type: 'box', scale: 1.0 },
+            { type: 'cylinder', scale: 1.0 },
+            { type: 'octa', scale: 1.0 },
+            { type: 'tetra', scale: 1.0 }
+        ];
+        const BOROUGH_GEOMETRIES = {
+            sphere: new THREE.SphereGeometry(0.13, 12, 12),
+            box: new THREE.BoxGeometry(0.18, 0.18, 0.18),
+            cylinder: new THREE.CylinderGeometry(0.08, 0.08, 0.22, 12),
+            octa: new THREE.OctahedronGeometry(0.14),
+            tetra: new THREE.TetrahedronGeometry(0.15)
         };
 
         let RAW = [];
@@ -162,7 +184,7 @@
 
         renderer.setSize(W, H);
         renderer.setPixelRatio(window.devicePixelRatio || 1);
-        renderer.setClearColor(0x000000, 0);
+        renderer.setClearColor(0xffffff, 1);
         container.appendChild(renderer.domElement);
 
         scene.add(new THREE.AmbientLight(0xffffff, 0.7));
@@ -239,14 +261,14 @@
             return makeLine(pts, color, 0.9);
         }
 
-        function makeSprite(text, pos) {
+        function makeSprite(text, pos, meta) {
             const canvas = document.createElement('canvas');
             canvas.width = 256;
             canvas.height = 64;
             const ctx = canvas.getContext('2d');
-            ctx.fillStyle = isDark ? 'rgba(30,30,30,0.85)' : 'rgba(255,255,255,0.85)';
+            ctx.fillStyle = isDark ? 'rgba(30,30,30,0.95)' : 'rgba(255,255,255,0.95)';
             ctx.fillRect(0, 0, 256, 64);
-            ctx.fillStyle = isDark ? '#dddddd' : '#333333';
+            ctx.fillStyle = isDark ? '#ffffff' : '#000000';
             ctx.font = 'bold 22px sans-serif';
             ctx.textAlign = 'center';
             ctx.fillText(text, 128, 40);
@@ -258,6 +280,7 @@
             const sp = new THREE.Sprite(mat);
             sp.position.copy(pos);
             sp.scale.set(2, 0.5, 1);
+            if (meta) sp.userData = meta;
             return sp;
         }
 
@@ -296,11 +319,11 @@
             });
             scene.add(axes);
 
-            bandsGroup.add(mkBandPlane(UCL, 0xff4444, 0.06));
-            bandsGroup.add(mkBandPlane(LCL, 0x4444ff, 0.06));
-            bandsGroup.add(mkControlLine(mean, 0x888888));
-            bandsGroup.add(mkControlLine(UCL, 0xee3333));
-            bandsGroup.add(mkControlLine(LCL, 0x3333ee));
+            bandsGroup.add(mkBandPlane(UCL, 0xCCCCCC, 0.06));
+            bandsGroup.add(mkBandPlane(LCL, 0x999999, 0.06));
+            bandsGroup.add(mkControlLine(mean, 0x666666));
+            bandsGroup.add(mkControlLine(UCL, 0x777777));
+            bandsGroup.add(mkControlLine(LCL, 0x444444));
 
             spheres = [];
             BOROUGHS.forEach(borough => {
@@ -313,28 +336,99 @@
                         const linePts = pts.map(d => new THREE.Vector3(mapX(d.y), mapY(d.v), mapZ(d.b)));
                         dataGroups[season].add(makeLine(linePts, col, 0.7));
                     }
-                    pts.forEach(d => {
-                        const isOut = d.v > UCL || d.v < LCL;
-                        const geo = new THREE.SphereGeometry(isOut ? 0.18 : 0.13, 12, 12);
-                        const mat = new THREE.MeshPhongMaterial({
-                            color: isOut ? 0xff0000 : col,
-                            emissive: isOut ? 0x440000 : 0x000000
-                        });
-                        const mesh = new THREE.Mesh(geo, mat);
-                        mesh.position.set(mapX(d.y), mapY(d.v), mapZ(d.b));
-                        mesh.userData = d;
-                        dataGroups[season].add(mesh);
-                        spheres.push(mesh);
-                    });
+                            pts.forEach(d => {
+                                const isAbove = d.v > UCL;
+                                const isBelow = d.v < LCL;
+                                const bIdx = BOROUGHS.indexOf(d.b);
+                                const useMarkersEl = document.getElementById('chkBoroughMarkers');
+                                const useMarkers = useMarkersEl ? useMarkersEl.checked : true;
+                                // Use borough marker geometry for normal points and outliers so shapes match
+                                let geo;
+                                const marker = BOROUGH_MARKERS[bIdx] || BOROUGH_MARKERS[0];
+                                if (useMarkers) {
+                                    geo = BOROUGH_GEOMETRIES[marker.type];
+                                } else {
+                                    geo = new THREE.SphereGeometry(0.13, 12, 12);
+                                }
+                                const mat = new THREE.MeshPhongMaterial({
+                                    color: isAbove ? 0x000000 : (isBelow ? 0x444444 : col),
+                                    emissive: 0x000000
+                                });
+                                const mesh = new THREE.Mesh(geo, mat);
+                                // scale markers: above UCL larger, below LCL slightly smaller
+                                let baseScale = marker.scale || 1.0;
+                                if (isAbove) baseScale *= 1.6;
+                                else if (isBelow) baseScale *= 0.9;
+                                mesh.scale.setScalar(baseScale);
+                                const zOffset = (bIdx - (BOROUGHS.length - 1) / 2) * 0.03;
+                                mesh.position.set(mapX(d.y), mapY(d.v), mapZ(d.b) + zOffset);
+                                mesh.userData = d;
+                                dataGroups[season].add(mesh);
+                                spheres.push(mesh);
+                            });
                 });
             });
 
-            BOROUGHS.forEach(b => scene.add(makeSprite(b, new THREE.Vector3(-5.5, mapY(0) - 0.5, mapZ(b)))));
+            BOROUGHS.forEach(b => scene.add(makeSprite(b, new THREE.Vector3(-5.5, mapY(0) - 0.5, mapZ(b)), { type: 'borough', borough: b })));
             allYears.filter((_, i) => i % 2 === 0).forEach(y => scene.add(makeSprite(String(y), new THREE.Vector3(mapX(y), mapY(0) - 0.7, 4.5))));
             [0, 5, 10, 15, 20, 25, 30].forEach(v => scene.add(makeSprite(String(v), new THREE.Vector3(-5.8, mapY(v), -4))));
             scene.add(makeSprite(`UCL=${UCL.toFixed(1)}`, new THREE.Vector3(5.5, mapY(UCL), 0)));
             scene.add(makeSprite(`Mean=${mean.toFixed(1)}`, new THREE.Vector3(5.5, mapY(mean), 0)));
             scene.add(makeSprite(`LCL=${LCL.toFixed(1)}`, new THREE.Vector3(5.5, mapY(LCL), 0)));
+            // populate simple legend for borough marker shapes
+            const legendEl = document.getElementById('legend');
+            if (legendEl) {
+                legendEl.innerHTML = '';
+                BOROUGHS.forEach((b, i) => {
+                    const wrapper = document.createElement('div');
+                    wrapper.style.display = 'flex';
+                    wrapper.style.alignItems = 'center';
+                    wrapper.style.gap = '6px';
+                    wrapper.style.marginRight = '8px';
+
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 24;
+                    canvas.height = 24;
+                    canvas.style.width = '16px';
+                    canvas.style.height = '16px';
+                    canvas.style.borderRadius = '3px';
+                    canvas.style.background = 'transparent';
+                    canvas.title = b;
+                    canvas.setAttribute('aria-label', b);
+                    const ctx = canvas.getContext('2d');
+                    // draw matching icon for marker type
+                    const marker = BOROUGH_MARKERS[i] || BOROUGH_MARKERS[0];
+                    ctx.clearRect(0, 0, 24, 24);
+                    ctx.fillStyle = '#444';
+                    ctx.strokeStyle = '#eee';
+                    ctx.lineWidth = 1.5;
+                    const cx = 12, cy = 12;
+                    switch ((marker.type || 'sphere')) {
+                        case 'sphere':
+                            ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); break;
+                        case 'box':
+                            ctx.beginPath(); ctx.rect(cx - 6, cy - 6, 12, 12); ctx.fill(); ctx.stroke(); break;
+                        case 'cylinder':
+                            ctx.beginPath(); ctx.ellipse(cx, cy - 2, 6, 4, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+                            ctx.beginPath(); ctx.rect(cx - 5, cy - 2, 10, 8); ctx.fill(); ctx.stroke(); break;
+                        case 'octa':
+                            ctx.beginPath(); ctx.moveTo(cx, cy - 8); ctx.lineTo(cx + 8, cy); ctx.lineTo(cx, cy + 8); ctx.lineTo(cx - 8, cy); ctx.closePath(); ctx.fill(); ctx.stroke(); break;
+                        case 'tetra':
+                            ctx.beginPath(); ctx.moveTo(cx, cy - 8); ctx.lineTo(cx + 7, cy + 6); ctx.lineTo(cx - 7, cy + 6); ctx.closePath(); ctx.fill(); ctx.stroke(); break;
+                        default:
+                            ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); break;
+                    }
+
+                    const lbl = document.createElement('div');
+                    lbl.textContent = b;
+                    lbl.style.fontSize = '12px';
+                    lbl.style.color = '#333';
+
+                    wrapper.appendChild(canvas);
+                    wrapper.appendChild(lbl);
+                    legendEl.appendChild(wrapper);
+                });
+            }
         }
 
         async function loadData() {
@@ -373,6 +467,81 @@
                 LCL = Math.max(0, mean - 2 * std);
 
                 initScene();
+                // initialize basic controls (Reset + isolate handlers)
+                try {
+                    const resetBtn = document.getElementById('resetView');
+                    resetBtn.addEventListener('click', () => {
+                        spherical.theta = 0.6;
+                        spherical.phi = 0.9;
+                        spherical.r = 18;
+                        target.set(0, 1, 0);
+                        // restore full opacity
+                        spheres.forEach(m => { if (m.material) { m.material.transparent = false; m.material.opacity = 1; } });
+                        updateCamera();
+                    });
+
+                    // click to isolate boroughs (click sprites)
+                    container.addEventListener('click', e => {
+                        const rect = container.getBoundingClientRect();
+                        const mx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                        const my = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+                        mouse.x = mx; mouse.y = my;
+                        raycaster.setFromCamera(mouse, camera);
+                        const hits = raycaster.intersectObjects(scene.children, true);
+                        for (let h of hits) {
+                            const obj = h.object;
+                            if (obj.userData && obj.userData.type === 'borough') {
+                                isolateBorough(obj.userData.borough);
+                                break;
+                            }
+                        }
+                    });
+
+                    function isolateBorough(borough) {
+                        // toggle: if already isolated, restore
+                        const anyDimmed = spheres.some(m => m.material && m.material.opacity && m.material.opacity < 1);
+                        if (anyDimmed) {
+                            spheres.forEach(m => { if (m.material) { m.material.transparent = false; m.material.opacity = 1; } });
+                            return;
+                        }
+
+                        // tween camera to borough and fade others
+                        const tz = mapZ(borough);
+                        const newTarget = new THREE.Vector3(0, 1, tz);
+                        const newSpherical = { theta: 0.6, phi: 0.9, r: 10 };
+                        tweenTo(newSpherical, newTarget, 400);
+
+                        spheres.forEach(m => {
+                            if (m.userData && m.userData.b === borough) {
+                                if (m.material) { m.material.transparent = false; m.material.opacity = 1; }
+                            } else {
+                                if (m.material) { m.material.transparent = true; m.material.opacity = 0.15; }
+                            }
+                        });
+                    }
+
+                    // lightweight tween helper for spherical + target
+                    function tweenTo(targetSph, targetVec, duration) {
+                        const start = { theta: spherical.theta, phi: spherical.phi, r: spherical.r, tx: target.x, ty: target.y, tz: target.z };
+                        const end = { theta: targetSph.theta, phi: targetSph.phi, r: targetSph.r, tx: targetVec.x, ty: targetVec.y, tz: targetVec.z };
+                        const t0 = performance.now();
+                        function step(now) {
+                            const p = Math.min(1, (now - t0) / duration);
+                            spherical.theta = start.theta + (end.theta - start.theta) * p;
+                            spherical.phi = start.phi + (end.phi - start.phi) * p;
+                            spherical.r = start.r + (end.r - start.r) * p;
+                            target.x = start.tx + (end.tx - start.tx) * p;
+                            target.y = start.ty + (end.ty - start.ty) * p;
+                            target.z = start.tz + (end.tz - start.tz) * p;
+                            updateCamera();
+                            if (p < 1) requestAnimationFrame(step);
+                        }
+                        requestAnimationFrame(step);
+                    }
+
+                } catch (err) {
+                    console.warn('Control init error', err);
+                }
             } catch (err) {
                 console.error('Error loading CSV:', err);
             }
@@ -388,6 +557,8 @@
         document.getElementById('chkBands').addEventListener('change', e => {
             bandsGroup.visible = e.target.checked;
         });
+        const boroughToggle = document.getElementById('chkBoroughMarkers');
+        if (boroughToggle) boroughToggle.addEventListener('change', () => initScene());
 
         let isDragging = false,
             isRight = false,
@@ -432,8 +603,10 @@
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
         const tooltip = document.getElementById('tooltip');
+        let pinnedTooltip = null;
 
         container.addEventListener('mousemove', e => {
+            if (pinnedTooltip) return; // don't update when pinned
             const rect = container.getBoundingClientRect();
             mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
             mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -442,12 +615,31 @@
             if (hits.length) {
                 const d = hits[0].object.userData;
                 const isOut = d.v > UCL || d.v < LCL;
+                const delta = d.v - mean;
+                const z = std ? (d.v - mean) / std : 0;
                 tooltip.style.display = 'block';
                 tooltip.style.left = (e.clientX + 14) + 'px';
                 tooltip.style.top = (e.clientY - 10) + 'px';
-                tooltip.innerHTML = `<b>${d.b}</b><br>${d.s} ${d.y}<br>Value: <b>${d.v.toFixed(2)}</b>${isOut ? '<br><span style="color:#e24b4a">&#9888; Out of control</span>' : ''}`;
+                tooltip.innerHTML = `<div style="font-weight:600">${d.b}</div>
+                    <div style="margin-top:4px">${d.s} ${d.y} — <b>${d.v.toFixed(2)}</b></div>
+                    <div style="font-size:12px;margin-top:6px">Δ mean: ${delta.toFixed(2)} &middot; z: ${z.toFixed(2)}</div>
+                    ${isOut ? '<div style="color:#000; font-weight:700; margin-top:6px">⚠ Out of control</div>' : ''}
+                    <div style="margin-top:6px"><button id="pinBtn">Pin</button></div>`;
             } else {
                 tooltip.style.display = 'none';
+            }
+        });
+
+        // Pin/unpin tooltip
+        tooltip.addEventListener('click', e => {
+            if (e.target && e.target.id === 'pinBtn') {
+                if (!pinnedTooltip) {
+                    pinnedTooltip = tooltip.innerHTML;
+                    // leave tooltip visible
+                } else {
+                    pinnedTooltip = null;
+                    tooltip.style.display = 'none';
+                }
             }
         });
 
